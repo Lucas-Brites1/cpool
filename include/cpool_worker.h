@@ -1,12 +1,14 @@
 #ifndef CPOOL_THREAD_H
 #define CPOOL_THREAD_H
 
+#include "cpool_types.h"
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 struct cpool_worker_t {
-  const char *worker_name;
+  cpool_t *pool;
+  char worker_buffer_name[64];
   unsigned int worker_id;
   pthread_t tid;
 

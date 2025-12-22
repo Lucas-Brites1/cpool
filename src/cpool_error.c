@@ -1,11 +1,7 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include "cpool_error.h"
+#include "../include/cpool_error.h"
 
-const char *error_to_string(enum cpool_error_e error)
-{
-  switch (error)
-  {
+const char *error_to_string(enum cpool_error_t error) {
+  switch (error) {
   case CPOOL_NO_ERR:
     return "Operation completed successfully";
   case CPOOL_ALLOC_FAILED:
