@@ -233,6 +233,6 @@ static void *cpool_worker_routine_loop(void *arg) {
   }
 
   cpool_t *pool = worker->pool;
-  printf("Hello from worker: %s\n", worker->worker_buffer_name);
+  printf("Hello from worker:  %s\n", worker->worker_buffer_name);
   return NULL;
 }
