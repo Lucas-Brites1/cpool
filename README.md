@@ -401,6 +401,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Issues**: [GitHub Issues](https://github.com/yourusername/cpool/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/yourusername/cpool/discussions)
-- **Email**: <your.email@example.com>
+- **Email**: <lucasbrites076@gmail.com>
 
 ---
