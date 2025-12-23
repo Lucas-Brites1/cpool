@@ -27,6 +27,7 @@ int main(void) {
 
   config.threads_init_count = 8;
   config.threads_max_count = 16;
+  config.thread_pool_is_log_enable = true;
 
   cpool_error_t err = cpool_create(&pool, config);
   if (err != CPOOL_NO_ERR) {

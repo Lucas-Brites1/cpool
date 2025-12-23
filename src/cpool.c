@@ -23,7 +23,7 @@ typedef struct cpool_t {
   size_t next_chunk_size;
   size_t task_total_allocated;
 
-  cpool_task_t *free_head; // object pool
+  cpool_task_t *free_head;
   cpool_task_t *queue_head;
   cpool_task_t *queue_tail;
 
@@ -37,12 +37,9 @@ typedef struct cpool_t {
   pthread_cond_t finish;
 } cpool_t;
 
-// Config functions
 static cpool_error_t cpool__sanitize_config(cpool_config_t *conf);
 
-// Helpers
-static cpool_error_t cpool__alloc(size_t quantity, size_t size,
-                                  void **ptr); // for object pool
+static cpool_error_t cpool__alloc(size_t quantity, size_t size, void **ptr);
 static cpool_error_t cpool__initialize_sync(cpool_t *pool);
 static cpool_error_t cpool__internal_destroy_sync(cpool_t *pool);
 static void cpool__mutex_lock(cpool_t *pool);
@@ -53,7 +50,6 @@ static void cpool__cond_wait(pthread_cond_t *cond, pthread_mutex_t *mtx);
 static pthread_attr_t cpool__get_stacksize_attr_by_conf(cpool_config_t *conf);
 static cpool_error_t cpool__internal_destroy_chunks(cpool_t *pool);
 
-// Chunk tasks && Free Head functions
 static inline size_t cpool__calculate_new_chunk_tasks_block_size(cpool_t *pool);
 static cpool_error_t cpool__internal_destroy_chunks(cpool_t *pool);
 static cpool_chunk_t *cpool__new_chunk_task(cpool_t *pool, size_t count);
@@ -61,14 +57,12 @@ static cpool_error_t cpool__merge_chunk_to_list(cpool_chunk_t *chunk,
                                                 cpool_task_t **head_ref);
 static inline bool cpool__should_alloc_new_chunk(cpool_t *pool);
 
-// Queue functions
-static cpool_task_t *cpool__get_free_task(cpool_t *pool);     // 1
-static cpool_error_t cpool_tasks_queue_enqueue(cpool_t *pool, // 2
+static cpool_task_t *cpool__get_free_task(cpool_t *pool);
+static cpool_error_t cpool_tasks_queue_enqueue(cpool_t *pool,
                                                cpool_task_t *task);
-static cpool_task_t *cpool_tasks_queue_dequeue(cpool_t *pool); // 3
-static void cpool__execute_task(cpool_task_t *task);           // 4
+static cpool_task_t *cpool_tasks_queue_dequeue(cpool_t *pool);
+static void cpool__execute_task(cpool_task_t *task);
 
-// Workers functions
 static cpool_error_t cpool__spawn_core_workers(cpool_t *pool);
 static cpool_error_t cpool__spawn_dynamic_workers(cpool_t *pool);
 static void cpool__set_worker_name(cpool_worker_t *self, cpool_config_t *conf);
@@ -77,6 +71,34 @@ static inline bool cpool__worker_should_scale_down(cpool_t *pool,
                                                    cpool_worker_t *self);
 static void cpool__worker_exit(cpool_t *pool, cpool_worker_t *worker);
 static void *cpool_worker_routine_loop(void *arg);
+static cpool_error_t cpool__join_all_workers(cpool_t *pool);
+
+#define CPOOL_LOG(pool, fmt, ...)                                              \
+  do {                                                                         \
+    if ((pool)->conf.thread_pool_is_log_enable) {                              \
+      fprintf(stdout, "[CPOOL:%s] " fmt "\n", (pool)->conf.thread_pool_name,   \
+              ##__VA_ARGS__);                                                  \
+      fflush(stdout);                                                          \
+    }                                                                          \
+  } while (0)
+
+#define CPOOL_LOG_ERROR(pool, fmt, ...)                                        \
+  do {                                                                         \
+    if ((pool)->conf.thread_pool_is_log_enable) {                              \
+      fprintf(stderr, "[CPOOL:%s] ERROR: " fmt "\n",                           \
+              (pool)->conf.thread_pool_name, ##__VA_ARGS__);                   \
+      fflush(stderr);                                                          \
+    }                                                                          \
+  } while (0)
+
+#define CPOOL_LOG_WARN(pool, fmt, ...)                                         \
+  do {                                                                         \
+    if ((pool)->conf.thread_pool_is_log_enable) {                              \
+      fprintf(stderr, "[CPOOL:%s] WARNING: " fmt "\n",                         \
+              (pool)->conf.thread_pool_name, ##__VA_ARGS__);                   \
+      fflush(stderr);                                                          \
+    }                                                                          \
+  } while (0)
 
 static cpool_error_t cpool__alloc(size_t quantity, size_t size, void **ptr) {
   if (!ptr) {
@@ -92,66 +114,103 @@ static cpool_error_t cpool__alloc(size_t quantity, size_t size, void **ptr) {
   return CPOOL_NO_ERR;
 }
 
-static void cpool__mutex_lock(cpool_t *pool) { pthread_mutex_lock(&pool->mtx); }
+static void cpool__mutex_lock(cpool_t *pool) {
+  int rc = pthread_mutex_lock(&pool->mtx);
+  if (rc != 0) {
+    fprintf(stderr, "[CPOOL] Fatal: mutex_lock failed with code %d\n", rc);
+  }
+}
 
 static void cpool__mutex_unlock(cpool_t *pool) {
-  pthread_mutex_unlock(&pool->mtx);
+  int rc = pthread_mutex_unlock(&pool->mtx);
+  if (rc != 0) {
+    fprintf(stderr, "[CPOOL] Fatal: mutex_unlock failed with code %d\n", rc);
+  }
 }
 
 static void cpool__cond_alert(pthread_cond_t *cond) {
-  pthread_cond_signal(cond);
+  int rc = pthread_cond_signal(cond);
+  if (rc != 0) {
+    fprintf(stderr, "[CPOOL] Warning: cond_signal failed with code %d\n", rc);
+  }
 }
 
 static void cpool__cond_broadcast(pthread_cond_t *cond) {
-  pthread_cond_broadcast(cond);
+  int rc = pthread_cond_broadcast(cond);
+  if (rc != 0) {
+    fprintf(stderr, "[CPOOL] Warning: cond_broadcast failed with code %d\n",
+            rc);
+  }
 }
 
 static void cpool__cond_wait(pthread_cond_t *cond, pthread_mutex_t *mtx) {
-  pthread_cond_wait(cond, mtx);
+  int rc = pthread_cond_wait(cond, mtx);
+  if (rc != 0) {
+    fprintf(stderr, "[CPOOL] Warning: cond_wait failed with code %d\n", rc);
+  }
 }
 
 static cpool_error_t cpool__initialize_sync(cpool_t *pool) {
+  CPOOL_LOG(pool, "Initializing synchronization primitives");
+
   int rc = pthread_mutex_init(&pool->mtx, NULL);
   if (rc != 0) {
+    CPOOL_LOG_ERROR(pool, "Failed to initialize mutex: %d", rc);
     return CPOOL_ERR_INIT_MUTEX;
   }
 
   rc = pthread_cond_init(&pool->notify, NULL);
   if (rc != 0) {
+    CPOOL_LOG_ERROR(pool, "Failed to initialize notify condvar: %d", rc);
+    pthread_mutex_destroy(&pool->mtx);
     return CPOOL_ERR_INIT_COND;
   }
 
   rc = pthread_cond_init(&pool->finish, NULL);
   if (rc != 0) {
+    CPOOL_LOG_ERROR(pool, "Failed to initialize finish condvar: %d", rc);
+    pthread_cond_destroy(&pool->notify);
+    pthread_mutex_destroy(&pool->mtx);
     return CPOOL_ERR_INIT_COND;
   }
 
+  CPOOL_LOG(pool, "Synchronization primitives initialized successfully");
   return CPOOL_NO_ERR;
 }
 
 static cpool_error_t cpool__internal_destroy_sync(cpool_t *pool) {
+  CPOOL_LOG(pool, "Destroying synchronization primitives");
+
   int rc = pthread_mutex_destroy(&pool->mtx);
   if (rc != 0) {
+    CPOOL_LOG_ERROR(pool, "Failed to destroy mutex: %d", rc);
     return CPOOL_ERR_FREE_MUTEX;
   }
 
   rc = pthread_cond_destroy(&pool->notify);
   if (rc != 0) {
+    CPOOL_LOG_ERROR(pool, "Failed to destroy notify condvar: %d", rc);
     return CPOOL_ERR_FREE_COND;
   }
 
   rc = pthread_cond_destroy(&pool->finish);
   if (rc != 0) {
+    CPOOL_LOG_ERROR(pool, "Failed to destroy finish condvar: %d", rc);
     return CPOOL_ERR_FREE_COND;
   }
 
+  CPOOL_LOG(pool, "Synchronization primitives destroyed successfully");
   return CPOOL_NO_ERR;
 }
 
 static pthread_attr_t cpool__get_stacksize_attr_by_conf(cpool_config_t *conf) {
-  pthread_attr_t attr = {};
+  pthread_attr_t attr;
   pthread_attr_init(&attr);
-  pthread_attr_setstacksize(&attr, conf->thread_stack_size);
+
+  if (conf->thread_stack_size != 0) {
+    pthread_attr_setstacksize(&attr, conf->thread_stack_size);
+  }
+
   return attr;
 }
 
@@ -202,10 +261,14 @@ static cpool_chunk_t *cpool__new_chunk_task(cpool_t *pool, size_t count) {
   if (!pool || count == 0)
     return NULL;
 
+  CPOOL_LOG(pool, "Allocating new task chunk: %zu tasks", count);
+
   size_t total_size = sizeof(cpool_chunk_t) + (count * sizeof(cpool_task_t));
   void *ptr_to_alloc = NULL;
 
   if (cpool__alloc(1, total_size, &ptr_to_alloc) != CPOOL_NO_ERR) {
+    CPOOL_LOG_ERROR(pool, "Failed to allocate task chunk of size %zu",
+                    total_size);
     return NULL;
   }
 
@@ -222,6 +285,10 @@ static cpool_chunk_t *cpool__new_chunk_task(cpool_t *pool, size_t count) {
   new_chunk->tasks[count - 1].next = NULL;
 
   pool->task_total_allocated += count;
+
+  CPOOL_LOG(pool, "Task chunk allocated successfully. Total tasks: %zu/%zu",
+            pool->task_total_allocated, pool->conf.tasks_max_count);
+
   return new_chunk;
 }
 
@@ -291,7 +358,7 @@ static inline bool cpool__worker_should_scale_up(cpool_t *pool) {
 }
 
 static void cpool__worker_exit(cpool_t *pool, cpool_worker_t *worker) {
-  pthread_detach(worker->tid);
+  CPOOL_LOG(pool, "Worker %s exiting", worker->worker_buffer_name);
   worker->tid = 0;
 }
 
@@ -303,15 +370,20 @@ static cpool_error_t cpool__spawn_core_workers(cpool_t *pool) {
   size_t core_workers_count = pool->conf.threads_init_count;
   size_t total_workers_count = pool->conf.threads_max_count;
 
+  CPOOL_LOG(pool, "Spawning %zu core workers (max: %zu)", core_workers_count,
+            total_workers_count);
+
   void *ptr_to_alloc = NULL;
   cpool_error_t err =
       cpool__alloc(total_workers_count, sizeof(cpool_worker_t), &ptr_to_alloc);
 
   if (err != CPOOL_NO_ERR || !ptr_to_alloc) {
+    CPOOL_LOG_ERROR(pool, "Failed to allocate workers array");
     return CPOOL_ALLOC_FAILED;
   }
 
   cpool_worker_t *workers = (cpool_worker_t *)ptr_to_alloc;
+  memset(workers, 0, total_workers_count * sizeof(cpool_worker_t));
 
   pool->workers = workers;
 
@@ -326,20 +398,25 @@ static cpool_error_t cpool__spawn_core_workers(cpool_t *pool) {
     int rc =
         pthread_create(&worker->tid, &attr, cpool_worker_routine_loop, worker);
     if (rc != 0) {
+      CPOOL_LOG_ERROR(pool, "Failed to create core worker %zu: %d", i, rc);
       for (size_t j = 0; j < i; j++) {
         pthread_cancel(pool->workers[j].tid);
         pthread_join(pool->workers[j].tid, NULL);
       }
       pthread_attr_destroy(&attr);
-      // cpool__internal_destroy(pool);
+      free(pool->workers);
+      pool->workers = NULL;
       return CPOOL_FAILED_TO_CREATE_THREAD;
     }
 
     cpool__set_worker_name(worker, &pool->conf);
+    CPOOL_LOG(pool, "Core worker created: %s", worker->worker_buffer_name);
   }
 
   pthread_attr_destroy(&attr);
 
+  CPOOL_LOG(pool, "All %zu core workers spawned successfully",
+            core_workers_count);
   return CPOOL_NO_ERR;
 }
 
@@ -353,6 +430,9 @@ static cpool_error_t cpool__spawn_dynamic_workers(cpool_t *pool) {
   size_t max_workers = pool->conf.threads_max_count;
 
   size_t spawned_count = 0;
+
+  CPOOL_LOG(pool, "Attempting to spawn up to %zu dynamic workers",
+            quantity_to_spawn);
 
   pthread_attr_t attr = cpool__get_stacksize_attr_by_conf(&pool->conf);
 
@@ -372,16 +452,23 @@ static cpool_error_t cpool__spawn_dynamic_workers(cpool_t *pool) {
                               worker);
 
       if (rc != 0) {
+        CPOOL_LOG_ERROR(pool, "Failed to create dynamic worker %zu: %d", i, rc);
         pthread_attr_destroy(&attr);
         return CPOOL_FAILED_TO_CREATE_THREAD;
       }
-    }
 
-    cpool__set_worker_name(worker, &pool->conf);
-    spawned_count++;
+      cpool__set_worker_name(worker, &pool->conf);
+      CPOOL_LOG(pool, "Dynamic worker spawned: %s", worker->worker_buffer_name);
+      spawned_count++;
+    }
   }
 
   pthread_attr_destroy(&attr);
+
+  if (spawned_count > 0) {
+    CPOOL_LOG(pool, "Spawned %zu dynamic workers", spawned_count);
+  }
+
   return CPOOL_NO_ERR;
 }
 
@@ -445,26 +532,22 @@ void cpool_config_init_default(cpool_config_t *conf) {
   long num_cores = sysconf(_SC_NPROCESSORS_ONLN);
   num_cores = num_cores <= 1 ? 2 : num_cores;
 
-  // Threads Configs
   conf->threads_init_count = (size_t)num_cores;
   conf->threads_max_count = (size_t)num_cores * 2;
   conf->thread_stack_size = CPOOL_DEFAULT_STACK_SIZE;
   conf->threads_scale_threshold = 0.75f;
   conf->threads_scale_step = 2;
 
-  // Tasks Configs
   size_t start_tasks = (size_t)num_cores * 16;
   conf->tasks_chunk_block_size = 32;
   conf->tasks_init_count = (start_tasks < 64) ? 64 : start_tasks;
   conf->tasks_max_count = 4096;
   conf->tasks_scale_threshold = 0.75f;
 
-  // Policies Configs
   conf->cpool_is_enabled_graceful_shutdown = true;
   conf->threads_kill_dynamic_thread_when_exceed_time = true;
   conf->threads_kill_time_ms = CPOOL_DEFAULT_KILL_TIME_MS;
 
-  // Identity
   snprintf(conf->thread_pool_name, sizeof(conf->thread_pool_name),
            "default-pool");
 }
@@ -472,6 +555,8 @@ void cpool_config_init_default(cpool_config_t *conf) {
 static cpool_task_t *cpool__get_free_task(cpool_t *pool) {
   if (!pool->free_head) {
     if (!cpool__should_alloc_new_chunk(pool)) {
+      CPOOL_LOG_WARN(pool, "Task queue is full (%zu/%zu tasks allocated)",
+                     pool->task_total_allocated, pool->conf.tasks_max_count);
       return NULL;
     }
 
@@ -479,6 +564,7 @@ static cpool_task_t *cpool__get_free_task(cpool_t *pool) {
         cpool__new_chunk_task(pool, pool->next_chunk_size);
 
     if (!new_chunk) {
+      CPOOL_LOG_ERROR(pool, "Failed to allocate new task chunk");
       return NULL;
     }
 
@@ -504,6 +590,8 @@ static void *cpool_worker_routine_loop(void *arg) {
 
   cpool_t *pool = worker->pool;
 
+  CPOOL_LOG(pool, "Worker %s started", worker->worker_buffer_name);
+
   for (;;) {
     cpool__mutex_lock(pool);
 
@@ -512,16 +600,16 @@ static void *cpool_worker_routine_loop(void *arg) {
     ts.tv_sec += (pool->conf.threads_kill_time_ms / 1000);
 
     while (pool->pending_tasks_to_complete == 0 && !pool->stopping) {
-
       int rc = pthread_cond_timedwait(&pool->notify, &pool->mtx, &ts);
 
-      if (rc != 0) {
+      if (rc == ETIMEDOUT) {
         if (cpool__worker_should_scale_down(pool, worker)) {
+          CPOOL_LOG(pool, "Worker %s idle timeout, scaling down",
+                    worker->worker_buffer_name);
           cpool__worker_exit(pool, worker);
           cpool__mutex_unlock(pool);
           return NULL;
         }
-
         clock_gettime(CLOCK_REALTIME, &ts);
         ts.tv_sec += (pool->conf.threads_kill_time_ms / 1000);
       }
@@ -538,7 +626,22 @@ static void *cpool_worker_routine_loop(void *arg) {
     cpool__mutex_unlock(pool);
 
     if (task) {
+      struct timespec start_time, end_time;
+      clock_gettime(CLOCK_MONOTONIC, &start_time);
+
       cpool__execute_task(task);
+
+      clock_gettime(CLOCK_MONOTONIC, &end_time);
+
+      long elapsed_ms = (end_time.tv_sec - start_time.tv_sec) * 1000 +
+                        (end_time.tv_nsec - start_time.tv_nsec) / 1000000;
+
+      if (pool->conf.tasks_time_limit_to_log > 0 &&
+          (size_t)elapsed_ms > pool->conf.tasks_time_limit_to_log) {
+        CPOOL_LOG_WARN(pool, "Task on worker %s took %ld ms (limit: %zu ms)",
+                       worker->worker_buffer_name, elapsed_ms,
+                       pool->conf.tasks_time_limit_to_log);
+      }
 
       cpool__mutex_lock(pool);
       pool->current_tasks_being_processed--;
@@ -564,9 +667,16 @@ cpool_error_t cpool_submit(cpool_t *pool, worker_routine_func func, void *arg) {
 
   cpool__mutex_lock(pool);
 
+  if (pool->stopping) {
+    CPOOL_LOG_WARN(pool, "Attempted to submit task while pool is stopping");
+    cpool__mutex_unlock(pool);
+    return CPOOL_INVALID_PARAM;
+  }
+
   cpool_task_t *task = cpool__get_free_task(pool);
 
   if (!task) {
+    CPOOL_LOG_ERROR(pool, "No free tasks available for submission");
     cpool__mutex_unlock(pool);
     return CPOOL_NULL_FREE_TASK;
   }
@@ -576,7 +686,14 @@ cpool_error_t cpool_submit(cpool_t *pool, worker_routine_func func, void *arg) {
 
   cpool_tasks_queue_enqueue(pool, task);
 
+  size_t pending = pool->pending_tasks_to_complete;
+  size_t processing = pool->current_tasks_being_processed;
+
+  CPOOL_LOG(pool, "Task submitted. Queue: %zu pending, %zu processing", pending,
+            processing);
+
   if (cpool__worker_should_scale_up(pool)) {
+    CPOOL_LOG(pool, "Load threshold reached, triggering dynamic worker spawn");
     cpool__spawn_dynamic_workers(pool);
   }
 
@@ -641,20 +758,36 @@ cpool_error_t cpool_create(cpool_t **pool_out, cpool_config_t config) {
 
   cpool_error_t err = cpool__sanitize_config(&config);
   if (err != CPOOL_NO_ERR) {
+    if (config.thread_pool_is_log_enable) {
+      fprintf(stderr, "[CPOOL:%s] Configuration validation failed\n",
+              config.thread_pool_name);
+    }
     return err;
   }
 
   void *ptr_to_alloc = NULL;
   err = cpool__alloc(1, sizeof(cpool_t), &ptr_to_alloc);
   if (err != CPOOL_NO_ERR) {
+    if (config.thread_pool_is_log_enable) {
+      fprintf(stderr, "[CPOOL:%s] Failed to allocate pool structure\n",
+              config.thread_pool_name);
+    }
     return err;
   }
 
   cpool_t *pool = (cpool_t *)ptr_to_alloc;
+  memset(pool, 0, sizeof(cpool_t));
   pool->conf = config;
+
+  CPOOL_LOG(pool, "Creating thread pool");
+  CPOOL_LOG(pool, "Config: threads=%zu/%zu, tasks=%zu/%zu, stack=%zu bytes",
+            config.threads_init_count, config.threads_max_count,
+            config.tasks_init_count, config.tasks_max_count,
+            config.thread_stack_size);
 
   err = cpool__initialize_sync(pool);
   if (err != CPOOL_NO_ERR) {
+    CPOOL_LOG_ERROR(pool, "Failed to initialize synchronization");
     free(pool);
     return err;
   }
@@ -663,6 +796,7 @@ cpool_error_t cpool_create(cpool_t **pool_out, cpool_config_t config) {
       cpool__new_chunk_task(pool, config.tasks_init_count);
 
   if (!initial_free_chunk) {
+    CPOOL_LOG_ERROR(pool, "Failed to allocate initial task chunk");
     cpool__internal_destroy_sync(pool);
     free(pool);
     return CPOOL_ALLOC_FAILED;
@@ -672,10 +806,14 @@ cpool_error_t cpool_create(cpool_t **pool_out, cpool_config_t config) {
 
   err = cpool__spawn_core_workers(pool);
   if (err != CPOOL_NO_ERR) {
+    CPOOL_LOG_ERROR(pool, "Failed to spawn core workers");
+    cpool__internal_destroy_chunks(pool);
     cpool__internal_destroy_sync(pool);
     free(pool);
     return err;
   }
+
+  CPOOL_LOG(pool, "Thread pool created successfully");
 
   *pool_out = pool;
   return CPOOL_NO_ERR;
@@ -685,12 +823,41 @@ cpool_error_t cpool_wait(cpool_t *pool) {
   if (!pool)
     return CPOOL_INVALID_PARAM;
 
+  CPOOL_LOG(pool, "Waiting for all tasks to complete");
+
   cpool__mutex_lock(pool);
   while (pool->pending_tasks_to_complete > 0 ||
          pool->current_tasks_being_processed > 0) {
     cpool__cond_wait(&pool->finish, &pool->mtx);
   }
   cpool__mutex_unlock(pool);
+
+  CPOOL_LOG(pool, "All tasks completed");
+
+  return CPOOL_NO_ERR;
+}
+
+static cpool_error_t cpool__join_all_workers(cpool_t *pool) {
+  if (!pool || !pool->workers) {
+    return CPOOL_NULL_POINTER;
+  }
+
+  CPOOL_LOG(pool, "Joining all worker threads");
+
+  size_t joined_count = 0;
+  for (size_t i = 0; i < pool->conf.threads_max_count; i++) {
+    if (pool->workers[i].tid != 0) {
+      int rc = pthread_join(pool->workers[i].tid, NULL);
+      if (rc != 0) {
+        CPOOL_LOG_ERROR(pool, "pthread_join failed for worker %zu: %d", i, rc);
+      } else {
+        joined_count++;
+      }
+      pool->workers[i].tid = 0;
+    }
+  }
+
+  CPOOL_LOG(pool, "Joined %zu worker threads", joined_count);
 
   return CPOOL_NO_ERR;
 }
@@ -699,22 +866,34 @@ cpool_error_t cpool_destroy(cpool_t *pool) {
   if (!pool)
     return CPOOL_INVALID_PARAM;
 
+  CPOOL_LOG(pool, "Destroying thread pool");
+
   cpool__mutex_lock(pool);
 
   if (pool->conf.cpool_is_enabled_graceful_shutdown) {
+    CPOOL_LOG(pool, "Graceful shutdown enabled, waiting for pending tasks");
     while (pool->pending_tasks_to_complete > 0 ||
            pool->current_tasks_being_processed > 0) {
       cpool__cond_wait(&pool->finish, &pool->mtx);
     }
+    CPOOL_LOG(pool, "All pending tasks completed");
+  } else {
+    CPOOL_LOG(pool, "Immediate shutdown requested");
   }
 
   pool->stopping = true;
   cpool__cond_broadcast(&pool->notify);
 
+  CPOOL_LOG(pool, "Signaled all workers to stop");
+
   cpool__mutex_unlock(pool);
-  usleep(100000);
+
+  cpool__join_all_workers(pool);
+
   cpool__internal_destroy_sync(pool);
   cpool__internal_destroy_chunks(pool);
+
+  CPOOL_LOG(pool, "Freeing pool resources");
 
   if (pool->workers)
     free(pool->workers);
@@ -724,13 +903,19 @@ cpool_error_t cpool_destroy(cpool_t *pool) {
 }
 
 static cpool_error_t cpool__internal_destroy_chunks(cpool_t *pool) {
+  CPOOL_LOG(pool, "Destroying task chunks");
+
+  size_t chunks_freed = 0;
   cpool_chunk_t *current = pool->tasks_chunks;
 
   while (current != NULL) {
     cpool_chunk_t *next = current->next;
     free(current);
+    chunks_freed++;
     current = next;
   }
+
+  CPOOL_LOG(pool, "Freed %zu task chunks", chunks_freed);
 
   pool->tasks_chunks = NULL;
   return CPOOL_NO_ERR;
