@@ -23,6 +23,9 @@ const char *error_to_string(cpool_error_t error) {
     return "Task queue has reached maximum capacity - cannot add new item";
   case CPOOL_SHUTDOWN_IN_PROGRESS:
     return "Operation rejected: The pool is currently shutting down";
+  case CPOOL_NULL_FREE_TASK:
+    return "Internal Error: Failed to retrieve a free task object from the "
+           "pool";
 
   // --- Configuration Errors (Validation) ---
   case CPOOL_CONF_MISSING:
