@@ -2,11 +2,13 @@
 #include "../include/cpool_chunk.h"
 #include "../include/cpool_task.h"
 #include "../include/cpool_worker.h"
+#include <limits.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 typedef struct cpool_t {
   cpool_config_t conf;
@@ -235,4 +237,88 @@ static void *cpool_worker_routine_loop(void *arg) {
   cpool_t *pool = worker->pool;
   printf("Hello from worker:  %s\n", worker->worker_buffer_name);
   return NULL;
+}
+
+static cpool_error_t cpool__sanitize_config(cpool_config_t *conf) {
+  if (!conf) {
+    return CPOOL_NULL_POINTER;
+  }
+
+  if (conf->threads_max_count == 0) {
+    return CPOOL_CONF_NO_THREADS;
+  }
+
+  if (conf->threads_init_count > conf->threads_max_count) {
+    return CPOOL_CONF_INIT_THREADS_GT_MAX;
+  }
+
+  if (conf->thread_stack_size != 0 &&
+      conf->thread_stack_size < PTHREAD_STACK_MIN) {
+    fprintf(stderr,
+            "[CPOOL] Error: Stack size %zu is too small. Min required: %zu\n",
+            conf->thread_stack_size, (size_t)PTHREAD_STACK_MIN);
+    return CPOOL_CONF_STACK_SIZE_TOO_SMALL;
+  }
+
+  if (conf->tasks_max_count == 0) {
+    return CPOOL_CONF_NO_TASKS;
+  }
+
+  if (conf->tasks_init_count > conf->tasks_max_count) {
+    return CPOOL_CONF_INIT_TASKS_GT_MAX;
+  }
+
+  if (conf->tasks_chunk_block_size == 0) {
+    size_t calc = conf->tasks_max_count / 4;
+    conf->tasks_chunk_block_size = (calc > 8) ? calc : 8;
+  }
+
+  if (conf->threads_scale_step == 0) {
+    conf->threads_scale_step = 1;
+  }
+
+  if (conf->threads_scale_threshold <= 0.001f ||
+      conf->threads_scale_threshold > 1.0f) {
+    conf->threads_scale_threshold = 0.75f;
+  }
+
+  if (conf->threads_kill_dynamic_thread_when_exceed_time &&
+      conf->threads_kill_time_ms < 100) {
+    conf->threads_kill_time_ms = CPOOL_DEFAULT_KILL_TIME_MS;
+  }
+
+  return CPOOL_NO_ERR;
+}
+
+void cpool_config_init_default(cpool_config_t *conf) {
+  if (!conf)
+    return;
+
+  memset(conf, 0, sizeof(cpool_config_t));
+
+  long num_cores = sysconf(_SC_NPROCESSORS_ONLN);
+  num_cores = num_cores <= 1 ? 2 : num_cores;
+
+  // Threads Configs
+  conf->threads_init_count = (size_t)num_cores;
+  conf->threads_max_count = (size_t)num_cores * 2;
+  conf->thread_stack_size = CPOOL_DEFAULT_STACK_SIZE;
+  conf->threads_scale_threshold = 0.75f;
+  conf->threads_scale_step = 2;
+
+  // Tasks Configs
+  size_t start_tasks = (size_t)num_cores * 16;
+  conf->tasks_chunk_block_size = 32;
+  conf->tasks_init_count = (start_tasks < 64) ? 64 : start_tasks;
+  conf->tasks_max_count = 4096;
+  conf->tasks_scale_threshold = 0.75f;
+
+  // Policies Configs
+  conf->cpool_is_enabled_graceful_shutdown = true;
+  conf->threads_kill_dynamic_thread_when_exceed_time = true;
+  conf->threads_kill_time_ms = CPOOL_DEFAULT_KILL_TIME_MS;
+
+  // Identity
+  snprintf(conf->thread_pool_name, sizeof(conf->thread_pool_name),
+           "default-pool");
 }

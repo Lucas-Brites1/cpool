@@ -4,6 +4,7 @@
 #include "cpool_config.h"
 #include "cpool_types.h"
 
+void cpool_config_init_default(cpool_config_t *conf);
 cpool_t *cpool_create(cpool_config_t config);
 cpool_error_t cpool_submit(cpool_t *thread_pool, worker_routine_func func,
                            void *arg);
