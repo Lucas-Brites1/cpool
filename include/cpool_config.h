@@ -49,10 +49,21 @@ struct cpool_thread_pool_config_t {
                                            // immediately.
 };
 
-#define CPOOL_DEFAULT_STACK_SIZE                                               \
-  0 // Uses the SO default stack size (2MB || 8MB)
-#define CPOOL_STACK_SIZE_LOW_MEM (64 * 1024) // 64KB
+#define KiB (1024UL)
+#define MiB (1024UL * KiB)
+
+#define CPOOL_DEFAULT_STACK_SIZE 0 // Uses OS default (usually 2MB-8MB)
+#define CPOOL_STACK_SIZE_64KB (64 * KiB)
+#define CPOOL_STACK_SIZE_128KB (128 * KiB)
+#define CPOOL_STACK_SIZE_256KB (256 * KiB)
+#define CPOOL_STACK_SIZE_512KB (512 * KiB)
+#define CPOOL_STACK_SIZE_1MB (1 * MiB)
+#define CPOOL_STACK_SIZE_2MB (2 * MiB)
+#define CPOOL_STACK_SIZE_4MB (4 * MiB)
+#define CPOOL_STACK_SIZE_8MB (8 * MiB)
+#define CPOOL_STACK_SIZE_16MB (16 * MiB)
+
 #define CPOOL_CPU_AUTO_DETECT 0
-#define CPOOL_DEFAULT_KILL_TIME_MS 10000 // 10 seconds
+#define CPOOL_DEFAULT_KILL_TIME_MS 10000
 
 #endif // !CPOOL_CONFIG_H
